@@ -3,11 +3,19 @@ const mongoose = require("mongoose");
 const Message = require("../models/Messages.models");
 const User = require("../models/User.models");
 require("dotenv").config();
+let io;
 
 const setupSocket = (server) => {
-    const io = new Server(server, {
+    // const io = new Server(server, {
+    //     cors: {
+    //         origin: "https://campusconnect-1-tw1a.onrender.com",
+    //         credentials: true,
+    //         methods: ["GET", "POST"],
+    //     },
+    // });
+    io = new Server(server, {
         cors: {
-            origin: process.env.CLIENT_URL,
+            origin: "http://localhost:5173",
             credentials: true,
             methods: ["GET", "POST"],
         },
@@ -31,12 +39,20 @@ const setupSocket = (server) => {
             io.to(to).emit("signal-accepted", signal);
         });
 
-        socket.on("joinRoom", ({ sender, receiver }) => {
-            const roomId = [sender, receiver].sort().join("_"); // Ensure consistent room ID
+        socket.on("joinRoom", ({ sender, receiver, peerId }) => {
+            const roomId = [sender, receiver].sort().join("_");
             socket.join(roomId);
             console.log(`User ${socket.id} joined room ${roomId}`);
+
+            // Send peerId to the other person
+            socket.to(roomId).emit("remote-peer-id", peerId);
         });
-        
+
+        // 💥 Call End Logic
+        socket.on("end-call", ({ to }) => {
+            console.log(`Call ended with ${to}`);
+            io.to(to).emit("call-ended");
+        });
 
         socket.on("sendMessage", async ({ sender, receiver, message }) => {
             try {
@@ -78,10 +94,21 @@ const setupSocket = (server) => {
             socket.leave(roomId);
             console.log(`User ${socket.id} left room ${roomId}`);
         });
+        
+        socket.on("joinCollegeRoom", (collegeId) => {
+            if (collegeId) {
+                socket.join(collegeId);
+                console.log(`Socket ${socket.id} joined room for college ${collegeId}`);
+            }
+        });
 
     });
 
     return io;
 };
 
-module.exports = setupSocket;
+const getIO = () => io;
+
+
+
+module.exports = {setupSocket , getIO ,io};

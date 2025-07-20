@@ -26,7 +26,7 @@ const bountySchema = new mongoose.Schema({
         ref: 'User', // Alumni creating the bounty
         required: true,
     },
-    eligibleColleges: [{
+    eligibleCollege: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'College',
     }],
@@ -45,10 +45,29 @@ const bountySchema = new mongoose.Schema({
     },
     difficulty: {
         type: String,
-        enum: ['S', 'A', 'B', 'C', 'D'], // Difficulty levels
-        default: 'D',
+        enum: ['Basic', 'Intermediate', 'Advance'],
+        default: 'Basic',
+      },
+    eligibleCandidate:{
+        type:mongoose.mongoose.Schema.Types.ObjectId,
+        ref:'BountyData'
     },
-});
+    maxTeams: {
+        type: Number,
+        default: 5 // or any number depending on how many teams can apply
+      },
+      maxTeamSize: {
+        type: Number,
+        default: 4 // fixed team size
+      },
+      teamAssignedCount: {
+        type: Number,
+        default: 0
+      },
+      
+
+},{timestamps: true});
+
 
 const Bounty = mongoose.model('Bounty', bountySchema);
 module.exports = Bounty;

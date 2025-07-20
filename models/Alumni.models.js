@@ -20,6 +20,13 @@ const AlumniSchema = new mongoose.Schema({
     bio: {
         type: String,
     },
+    projects: [
+        {
+          title: { type: String },
+          description: { type: String },
+          link: { type: String }
+        }
+      ]
 });
 
-exports.module = mongoose.model('Alumni', AlumniSchema);
+module.exports = mongoose.model('Alumni', AlumniSchema);

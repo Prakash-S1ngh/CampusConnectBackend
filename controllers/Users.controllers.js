@@ -8,6 +8,7 @@ const UserInfo = require('../models/UserInfo.models');
 const Message = require('../models/Messages.models');
 require('dotenv').config();
 const mongoose = require('mongoose');
+const Participation = require('../models/Participation.models');
 
 exports.signup = async (req, res) => {
     try {
@@ -90,10 +91,7 @@ exports.signup = async (req, res) => {
 // Update Login Controller to include additional fields
 exports.login = async (req, res) => {
     try {
-        console.log("User is ",req.body);
         const { email, password } = req.body;
-        console.log("Email is ",email);
-        console.log("Password is ",password);
         // Validate input fields
         if (!email || !password) {
             return res.status(400).json({ message: 'Please provide both email and password' });
@@ -101,6 +99,7 @@ exports.login = async (req, res) => {
 
         // Check if user exists
         const user = await User.findOne({ email }).populate('college alumniDetails userInfo');
+        console.log("User found:", user);
         if (!user) {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
@@ -108,7 +107,7 @@ exports.login = async (req, res) => {
         // Compare password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(400).json({  message: 'Invalid credentials' });
+            return res.status(400).json({ message: 'Invalid credentials' });
         }
 
         // Generate JWT
@@ -118,11 +117,11 @@ exports.login = async (req, res) => {
         res.cookie('token', token, {
             httpOnly: true,  // Prevents client-side access
             secure: process.env.NODE_ENV === 'production',  // Use secure cookies in production
-            sameSite: 'Strict',  // Helps prevent CSRF attacks
-            maxAge: 3600000,  // 1 hour
+            sameSite: 'Strict', //for cookie cross-origin
+            maxAge: 24 * 3600000,  // 1 hour
         });
 
-        res.status(200).json({success:true ,message: 'Login successful', user });
+        res.status(200).json({ success: true, message: 'Login successful', user });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
@@ -173,11 +172,13 @@ exports.getOrderedConnections = async (req, res) => {
     try {
         const userId = req.userId;
 
-        const loggedInUser = await User.findById(userId).select("role");
+        const loggedInUser = await User.findById(userId).select("role college");
         if (!loggedInUser) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
+
         const userRole = loggedInUser.role;
+        const userCollege = loggedInUser.college;
 
         // Fetch messages received by the user
         const sentMessages = await Message.aggregate([
@@ -219,23 +220,15 @@ exports.getOrderedConnections = async (req, res) => {
         const allUserIds = allMessageUsers.map(msg => msg._id);
 
         // Get user details of those messaged
-        const messagedUsers = await User.find({ _id: { $in: allUserIds } })
+        const messagedUsers = await User.find({ _id: { $in: allUserIds }, role: userRole, college: userCollege })
             .select("name profileImage role");
 
-        // Remaining users of same role (excluding messaged + self)
+        // Remaining users of same role and same college (excluding messaged + self)
         const remainingUsers = await User.find({
             _id: { $nin: [...allUserIds, userId] },
-            role: userRole
+            role: userRole,
+            college: userCollege
         }).select("name profileImage role");
-
-        // Fetch connections for ordering
-        const allConnections = await Connection.find({
-            $or: [
-                { senderUser: userId },
-                { receiverUser: userId },
-            ],
-        }).populate("senderUser receiverUser")
-          .sort({ createdAt: -1 });
 
         // Final list
         const finalUsers = [
@@ -258,11 +251,11 @@ exports.getOrderedConnections = async (req, res) => {
                 role: user.role,
                 lastMessage: "None",
                 timestamp: null,
-                priority: "same-role"
+                priority: "same-role-same-college"
             }))
         ];
 
-        res.status(200).json({ success: true, users: finalUsers, connections: allConnections });
+        res.status(200).json({ success: true, users: finalUsers });
 
     } catch (error) {
         console.error("Error fetching connections:", error);
@@ -274,7 +267,7 @@ exports.getOrderedConnections = async (req, res) => {
 exports.getMessages = async (req, res) => {
     try {
         const { roomId } = req.query;
-        
+
         // Fetch messages for the given roomId, sorted in descending order (recent first)
         const messages = await Message.find({ roomId })
             .populate('sender receiver') // Populates sender & receiver details
@@ -289,91 +282,414 @@ exports.getMessages = async (req, res) => {
     }
 };
 
-
-
-exports.requests = async(req , res)=>{
+// Add all skills to the UserInfo
+exports.addSkill = async (req, res) => {
     try {
-        const { userId } = req.userId;
-        if(!userId){
-            return res.status(400).json({message: 'User not found'});
-        }
-        
-        const requests = await Connection.find({
-            receiverUser: userId,
-            status: 'pending',
-        })
-            .populate('senderUser senderAlumni')
-            .sort({ createdAt: -1 });
-    } catch (error) {
-        return res.status(500).json({
-            message:"An error occured while fetching the requests",
-            error:error.message
-        })
-    }
-}
+        const { skill, userinfoid } = req.body;
 
-
-// Accept Connection Request
-exports.acceptRequest = async (req, res) => {
-    try {
-        const { connectionId } = req.params; // Assuming connectionId is passed as a URL parameter
-
-        // Find the connection request
-        const connection = await Connection.findById(connectionId);
-        if (!connection) {
-            return res.status(404).json({ message: "Connection request not found" });
+        if (!skill || !userinfoid) {
+            return res.status(400).json({ message: "Skill and userinfo ID are required" });
         }
 
-        // Check if the request is already accepted
-        if (connection.status === "Accepted") {
-            return res.status(400).json({ message: "Request already accepted" });
-        }
+        const updatedUserInfo = await UserInfo.findByIdAndUpdate(
+            userinfoid,
+            { $addToSet: { skills: skill } }, // $addToSet avoids duplicates
+            { new: true }
+        );
 
-        // Update the status to "Accepted"
-        connection.status = "Accepted";
-        await connection.save();
+        if (!updatedUserInfo) {
+            return res.status(404).json({ message: "UserInfo not found" });
+        }
 
         res.status(200).json({
-            message: "Connection request accepted successfully",
-            connection,
+            message: "Skill added successfully",
+            data: updatedUserInfo
         });
     } catch (error) {
-        res.status(500).json({
-            message: "Internal Server Error while accepting request",
-            error: error.message,
-        });
+        console.error("Error adding skill:", error);
+        res.status(500).json({ message: "Server error" });
     }
 };
 
-// Reject Connection Request
-exports.rejectRequest = async (req, res) => {
+// Remove a skill from the UserInfo
+exports.removeSkill = async (req, res) => {
     try {
-        const { connectionId } = req.params; // Assuming connectionId is passed as a URL parameter
+        const { skill, userinfoid } = req.body;
 
-        // Find the connection request
-        const connection = await Connection.findById(connectionId);
-        if (!connection) {
-            return res.status(404).json({ message: "Connection request not found" });
+        if (!skill || !userinfoid) {
+            return res.status(400).json({ message: "Skill and userinfo ID are required" });
         }
 
-        // Check if the request is already rejected or accepted
-        if (connection.status === "Rejected") {
-            return res.status(400).json({ message: "Request already rejected" });
+        // Find the user info document
+        const userInfo = await UserInfo.findById(userinfoid);
+        if (!userInfo) {
+            return res.status(404).json({ message: "UserInfo not found" });
         }
 
-        // Update the status to "Rejected"
-        connection.status = "Rejected";
-        await connection.save();
+        // Filter out the skill, including from comma-separated strings
+        let updatedSkills = [];
+        for (let item of userInfo.skills) {
+            // Split if it contains commas, then filter
+            const parts = item.split(',').map(p => p.trim()).filter(Boolean);
+            const filtered = parts.filter(s => s.toLowerCase() !== skill.toLowerCase());
+
+            if (filtered.length === 0) continue;
+
+            // If more than one remains, join back. Else keep it as single.
+            updatedSkills.push(filtered.join(', '));
+        }
+
+        userInfo.skills = updatedSkills;
+        await userInfo.save();
 
         res.status(200).json({
-            message: "Connection request rejected successfully",
-            connection,
+            message: "Skill removed successfully",
+            data: userInfo
         });
     } catch (error) {
-        res.status(500).json({
-            message: "Internal Server Error while rejecting request",
-            error: error.message,
-        });
+        console.error("Error removing skill:", error);
+        res.status(500).json({ message: "Server error" });
     }
 };
 
+exports.addProject = async (req, res) => {
+    try {
+        const { project, userinfoid } = req.body;
+
+        if (!project) {
+            return res.status(400).json({ message: "Project is required" });
+        }
+
+        const updatedUserInfo = await UserInfo.findByIdAndUpdate(
+            userinfoid,
+            { $push: { 'social.projects': project } },
+            { new: true }
+        );
+
+        if (!updatedUserInfo) {
+            return res.status(404).json({ message: "UserInfo not found" });
+        }
+
+        res.status(200).json({
+            message: "Project added successfully",
+            data: updatedUserInfo
+        });
+
+    } catch (error) {
+        console.error("Error adding project:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+exports.removeProject = async (req, res) => {
+    try {
+        const { userinfoid, project } = req.body;
+
+        const updatedUserInfo = await UserInfo.findByIdAndUpdate(
+            userinfoid,
+            { $pull: { 'social.projects': project } },
+            { new: true }
+        );
+
+        if (!updatedUserInfo) {
+            return res.status(404).json({ message: "UserInfo not found" });
+        }
+
+        res.status(200).json({
+            message: "Project removed successfully",
+            data: updatedUserInfo
+        });
+
+    } catch (error) {
+        console.error("Error removing project:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+// Update user information
+exports.updateUser = async (req, res) => {
+    try {
+        const { name, email, role, profileImage, userInfo } = req.body;
+        const { userinfoid, bio, address, social } = userInfo;
+
+        if (!userinfoid) {
+            return res.status(400).json({ message: "UserInfo ID is required" });
+        }
+
+        // Update basic user fields
+        const updatedUser = await User.findOneAndUpdate(
+            { userInfo: userinfoid },
+            { name, email, role, profileImage },
+            { new: true }
+        );
+
+        // Update UserInfo document
+        const updatedUserInfo = await UserInfo.findByIdAndUpdate(
+            userinfoid,
+            { bio, address, social },
+            { new: true }
+        );
+
+        if (!updatedUser || !updatedUserInfo) {
+            return res.status(404).json({ message: "User or UserInfo not found" });
+        }
+
+        return res.status(200).json({
+            message: "User updated successfully",
+            updatedUser: {
+                _id: updatedUser._id,
+                name: updatedUser.name,
+                email: updatedUser.email,
+                role: updatedUser.role,
+                profileImage: updatedUser.profileImage,
+                userInfo: {
+                    _id: updatedUserInfo._id,
+                    bio: updatedUserInfo.bio,
+                    address: updatedUserInfo.address,
+                    social: updatedUserInfo.social
+                }
+            }
+        });
+    } catch (error) {
+        console.error("Error updating user:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+
+exports.getAlumniConnections = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const loggedInUser = await User.findById(userId).select("college");
+        if (!loggedInUser) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        const userCollege = loggedInUser.college;
+
+        // Fetch messages received by the user
+        const receivedMsgs = await Message.aggregate([
+            { $match: { receiver: new mongoose.Types.ObjectId(userId) } },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: "$sender",
+                    lastMessage: { $first: "$message" },
+                    timestamp: { $first: "$createdAt" }
+                }
+            }
+        ]);
+
+        // Fetch messages sent by the user
+        const sentMsgs = await Message.aggregate([
+            { $match: { sender: new mongoose.Types.ObjectId(userId) } },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: "$receiver",
+                    lastMessage: { $first: "$message" },
+                    timestamp: { $first: "$createdAt" }
+                }
+            }
+        ]);
+
+        // Merge and keep most recent message per user
+        const messageMap = new Map();
+
+        [...receivedMsgs, ...sentMsgs].forEach((msg) => {
+            const id = msg._id.toString();
+            if (!messageMap.has(id) || msg.timestamp > messageMap.get(id).timestamp) {
+                messageMap.set(id, msg);
+            }
+        });
+
+        const messagedUserIds = Array.from(messageMap.keys());
+
+        // Get Alumni details who have exchanged messages
+        const messagedAlumni = await User.find({
+            _id: { $in: messagedUserIds },
+            role: "Alumni",
+            college: userCollege
+        }).select("name profileImage role");
+
+        // Remaining alumni from same college (no messages exchanged)
+        const remainingAlumni = await User.find({
+            _id: { $nin: [...messagedUserIds, userId] },
+            role: "Alumni",
+            college: userCollege
+        }).select("name profileImage role");
+
+        // Format final output
+        const finalUsers = [
+            ...messagedAlumni.map(user => {
+                const msg = messageMap.get(user._id.toString());
+                return {
+                    userId: user._id,
+                    name: user.name,
+                    profileImage: user.profileImage,
+                    role: user.role,
+                    lastMessage: msg?.lastMessage || "None",
+                    timestamp: msg?.timestamp || null,
+                    priority: "messaged"
+                };
+            }),
+            ...remainingAlumni.map(user => ({
+                userId: user._id,
+                name: user.name,
+                profileImage: user.profileImage,
+                role: user.role,
+                lastMessage: "None",
+                timestamp: null,
+                priority: "same-college-alumni"
+            }))
+        ];
+        res.status(200).json({ success: true, users: finalUsers });
+
+    } catch (error) {
+        console.error("Error fetching alumni connections:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+exports.getJuniors = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const loggedInUser = await User.findById(userId).select("college");
+
+        if (!loggedInUser) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        const userCollege = loggedInUser.college;
+
+        // Fetch messages received by the user
+        const receivedMsgs = await Message.aggregate([
+            { $match: { receiver: new mongoose.Types.ObjectId(userId) } },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: "$sender",
+                    lastMessage: { $first: "$message" },
+                    timestamp: { $first: "$createdAt" }
+                }
+            }
+        ]);
+
+        // Fetch messages sent by the user
+        const sentMsgs = await Message.aggregate([
+            { $match: { sender: new mongoose.Types.ObjectId(userId) } },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: "$receiver",
+                    lastMessage: { $first: "$message" },
+                    timestamp: { $first: "$createdAt" }
+                }
+            }
+        ]);
+
+        const messageMap = new Map();
+
+        [...receivedMsgs, ...sentMsgs].forEach((msg) => {
+            const id = msg._id.toString();
+            if (!messageMap.has(id) || msg.timestamp > messageMap.get(id).timestamp) {
+                messageMap.set(id, msg);
+            }
+        });
+
+        const messagedUserIds = Array.from(messageMap.keys());
+
+        // Get messaged students from same college
+        const messagedJuniors = await User.find({
+            _id: { $in: messagedUserIds },
+            role: "Student",
+            college: userCollege
+        }).select("name profileImage role");
+
+        // Get students from same college not messaged
+        const remainingJuniors = await User.find({
+            _id: { $nin: [...messagedUserIds, userId] },
+            role: "Student",
+            college: userCollege
+        }).select("name profileImage role");
+
+        // Combine all into a single response
+        const finalUsers = [
+            ...messagedJuniors.map(user => {
+                const msg = messageMap.get(user._id.toString());
+                return {
+                    userId: user._id,
+                    name: user.name,
+                    profileImage: user.profileImage,
+                    role: user.role,
+                    lastMessage: msg?.lastMessage || "None",
+                    timestamp: msg?.timestamp || null,
+                    priority: "messaged"
+                };
+            }),
+            ...remainingJuniors.map(user => ({
+                userId: user._id,
+                name: user.name,
+                profileImage: user.profileImage,
+                role: user.role,
+                lastMessage: "None",
+                timestamp: null,
+                priority: "same-college-junior"
+            }))
+        ];
+
+        res.status(200).json({ success: true, users: finalUsers });
+
+    } catch (error) {
+        console.error("Error fetching juniors:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+
+exports.getTeamDetails = async (req, res) => {
+    try {
+      const userId = req.userId;
+      console.log("userId is ", userId);
+  
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+  
+      const participations = await Participation.find({
+        members: userId,
+      })
+        .populate({
+          path: "bounty",
+          match: { isActive: true },
+          select: "title description deadline updatedAt amount",
+        })
+        .populate({
+          path: "members",
+          select: "name profileImage",
+        });
+  
+      // Filter out null bounty (inactive ones)
+    //   let activeParticipations = participations
+    //     .filter(p => p.bounty)
+    //     .map(p => ({
+    //       bountyId: p.bounty._id,
+    //       bountyTitle: p.bounty.title,
+    //       description: p.bounty.description,
+    //       deadline: p.bounty.deadline,
+    //       updatedAt: p.bounty.updatedAt,
+    //       members: p.members.filter(m => m._id.toString() !== userId),
+    //     }));
+  
+      // Sort so that recent bounty comes first
+      participations.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  
+      res.status(200).json({
+        success: true,
+        participation: participations,
+      });
+  
+    } catch (error) {
+      console.error("Error fetching team details:", error);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  };

@@ -1,5 +1,5 @@
 const upload  = require('../config/multer.config');
-const { signup, login,  acceptRequest, rejectRequest, getUser, logout , getOrderedConnections, getMessages } = require('../controllers/Users.controllers');
+const { signup, login,  getUser, logout , getOrderedConnections, getMessages, addSkill, removeSkill, addProject, removeProject, updateUser, getAlumniConnections, getJuniors, getTeamDetails } = require('../controllers/Users.controllers');
 const { UserAuth } = require('../middleware/UserAuth.middleware');
 const express = require('express');
 const User = require('../models/User.models');
@@ -12,8 +12,12 @@ UserRouter.get('/getInfo', UserAuth, getUser);
 UserRouter.get('/fetchConnnections', UserAuth, getOrderedConnections);
 UserRouter.get('/messages',getMessages);
 
-// Accept and Reject Connection Requests
-UserRouter.patch('/accept/:connectionId', UserAuth, acceptRequest);
-UserRouter.patch('/reject/:connectionId', UserAuth, rejectRequest);
-
+UserRouter.post('/addskills', addSkill);
+UserRouter.delete('/removeskills', removeSkill);
+UserRouter.post('/addproject',addProject);
+UserRouter.delete('/removeproject', removeProject);
+UserRouter.put('/updateUser',updateUser);
+UserRouter.get('/getAlumni',UserAuth,getAlumniConnections);
+UserRouter.get('/getjuniors',UserAuth,getJuniors);
+UserRouter.get('/getTeams',UserAuth ,getTeamDetails);
 module.exports = UserRouter;

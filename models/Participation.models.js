@@ -8,8 +8,9 @@ const participationSchema = new mongoose.Schema({
     },
     teamName: {
         type: String,
+        enum: ['Code Avengers', 'Bug Busters', 'Pixel Ninjas', 'Hackstreet Boys', 'Code Crusaders'],
         required: true,
-    },
+      },
     members: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User', // Students participating in the team

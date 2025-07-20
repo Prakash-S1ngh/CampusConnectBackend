@@ -24,9 +24,13 @@ const UserInfoSchema = new mongoose.Schema({
         portfolio: {
             type: String,
         },
-        projects: {
-            type: [String],
-        },
+        projects: [
+            {
+              title: { type: String },
+              description: { type: String },
+              link: { type: String }
+            }
+          ]
     },
     address:{
         type:String
