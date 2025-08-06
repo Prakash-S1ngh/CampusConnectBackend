@@ -6,20 +6,20 @@ require("dotenv").config();
 let io;
 
 const setupSocket = (server) => {
-    // const io = new Server(server, {
-    //     cors: {
-    //         origin: "https://campusconnect-1-tw1a.onrender.com",
-    //         credentials: true,
-    //         methods: ["GET", "POST"],
-    //     },
-    // });
     io = new Server(server, {
         cors: {
-            origin: "http://localhost:5173",
+            origin: "https://campus-connect-d7ca.vercel.app/",
             credentials: true,
             methods: ["GET", "POST"],
         },
     });
+    // io = new Server(server, {
+    //     cors: {
+    //         origin: "http://localhost:5173",
+    //         credentials: true,
+    //         methods: ["GET", "POST"],
+    //     },
+    // });
 
     io.on("connection", async (socket) => {
         console.log("User connected:", socket.id);
