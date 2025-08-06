@@ -19,7 +19,7 @@ const UserSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['Student', 'Alumni','Faculty'], 
+        enum: ['Student', 'Alumni','Faculty', 'Director'], 
         default: 'Student',
     },
     college: {
@@ -34,6 +34,10 @@ const UserSchema = new mongoose.Schema({
     alumniDetails: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Alumni',
+    },
+    directorDetails: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Director',
     },
     userInfo: {
         type: mongoose.Schema.Types.ObjectId,

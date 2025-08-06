@@ -15,11 +15,27 @@ const MessageSchema = new mongoose.Schema({
         ref: 'User',
         required: true,
     },
+    recipient: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+    },
     message: {
         type: String,
         required: true,
     },
+    content: {
+        type: String,
+    },
+    messageType: {
+        type: String,
+        enum: ['text', 'image', 'file'],
+        default: 'text'
+    },
     isRead: {
+        type: Boolean,
+        default: false,
+    },
+    isCampusMessage: {
         type: Boolean,
         default: false,
     },

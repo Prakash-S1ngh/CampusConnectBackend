@@ -9,6 +9,7 @@ const Message = require('../models/Messages.models');
 require('dotenv').config();
 const mongoose = require('mongoose');
 const Participation = require('../models/Participation.models');
+const TeamMessage = require('../models/TeamMessage.model');
 
 exports.signup = async (req, res) => {
     try {
@@ -660,8 +661,7 @@ exports.getTeamDetails = async (req, res) => {
       })
         .populate({
           path: "bounty",
-          match: { isActive: true },
-          select: "title description deadline updatedAt amount",
+          select: "title description deadline updatedAt amount isActive",
         })
         .populate({
           path: "members",
@@ -693,3 +693,244 @@ exports.getTeamDetails = async (req, res) => {
       res.status(500).json({ success: false, message: "Server error" });
     }
   };
+
+// Get user by ID (for public profile viewing)
+exports.getUserById = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        if (!userId) {
+            return res.status(400).json({ success: false, message: "User ID is required" });
+        }
+
+        const user = await User.findById(userId)
+            .populate('college', 'name')
+            .populate('userInfo')
+            .populate('alumniDetails')
+            .populate('facultyDetails')
+            .populate('directorDetails');
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Return user data for public viewing (no sensitive information)
+        const publicUserData = {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            profileImage: user.profileImage,
+            college: user.college,
+            isOnline: user.isOnline,
+            lastSeen: user.lastSeen,
+            userInfo: user.userInfo,
+            alumniDetails: user.alumniDetails,
+            facultyDetails: user.facultyDetails,
+            directorDetails: user.directorDetails
+        };
+
+        return res.status(200).json({ 
+            success: true, 
+            user: publicUserData 
+        });
+
+    } catch (error) {
+        console.error("Error fetching user by ID:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// Get user's teams
+exports.getTeams = async (req, res) => {
+    try {
+        const userId = req.userId;
+
+        const participation = await Participation.find({
+            members: userId
+        }).populate('bounty', 'title description amount deadline isActive')
+        .populate('members', 'name profileImage role');
+
+        console.log(`[GET_TEAMS] User ${userId} has ${participation.length} teams`);
+
+        return res.status(200).json({
+            success: true,
+            participation: participation
+        });
+
+    } catch (error) {
+        console.error("Error fetching user teams:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// Get team members for a specific team
+exports.getTeamMembers = async (req, res) => {
+    try {
+        const { teamId } = req.params;
+        const userId = req.userId;
+
+        console.log(`[GET_TEAM_MEMBERS] Request for team ${teamId} by user ${userId}`);
+
+        if (!teamId) {
+            return res.status(400).json({ success: false, message: "Team ID is required" });
+        }
+
+        // Find the participation/team
+        const participation = await Participation.findById(teamId)
+            .populate('members', 'name profileImage role email')
+            .populate('bounty', 'title description amount deadline');
+
+        if (!participation) {
+            console.log(`[GET_TEAM_MEMBERS] Team ${teamId} not found`);
+            return res.status(404).json({ success: false, message: "Team not found" });
+        }
+
+        console.log(`[GET_TEAM_MEMBERS] Found team:`, participation.teamName);
+
+        // Check if user is a member of this team
+        const isMember = participation.members.some(member => member._id.toString() === userId);
+        if (!isMember) {
+            console.log(`[GET_TEAM_MEMBERS] User ${userId} is not a member of team ${teamId}`);
+            return res.status(403).json({ success: false, message: "Access denied. You are not a member of this team" });
+        }
+
+        console.log(`[GET_TEAM_MEMBERS] Returning ${participation.members.length} members`);
+
+        return res.status(200).json({
+            success: true,
+            members: participation.members,
+            teamInfo: {
+                teamName: participation.teamName,
+                bounty: participation.bounty,
+                isApproved: participation.isApproved,
+                submittedAt: participation.submittedAt
+            }
+        });
+
+    } catch (error) {
+        console.error("Error fetching team members:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// Get team messages
+exports.getTeamMessages = async (req, res) => {
+    try {
+        const { teamId } = req.params;
+        const userId = req.userId;
+
+        console.log(`[GET_TEAM_MESSAGES] Request for team ${teamId} by user ${userId}`);
+
+        if (!teamId) {
+            return res.status(400).json({ success: false, message: "Team ID is required" });
+        }
+
+        // Check if user is a member of this team
+        const participation = await Participation.findById(teamId);
+        if (!participation) {
+            console.log(`[GET_TEAM_MESSAGES] Team ${teamId} not found`);
+            return res.status(404).json({ success: false, message: "Team not found" });
+        }
+
+        const isMember = participation.members.some(member => member.toString() === userId);
+        if (!isMember) {
+            console.log(`[GET_TEAM_MESSAGES] User ${userId} is not a member of team ${teamId}`);
+            return res.status(403).json({ success: false, message: "Access denied. You are not a member of this team" });
+        }
+
+        // Fetch messages from TeamMessage model
+        const messages = await TeamMessage.find({ 
+            teamId: teamId,
+            isDeleted: false 
+        })
+        .populate('sender', 'name profileImage')
+        .sort({ createdAt: 1 })
+        .limit(100); // Limit to last 100 messages for performance
+
+        console.log(`[GET_TEAM_MESSAGES] Returning ${messages.length} messages`);
+
+        return res.status(200).json({
+            success: true,
+            messages: messages
+        });
+
+    } catch (error) {
+        console.error("Error fetching team messages:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+// Function to check all teams for a user
+exports.checkUserTeams = async (req, res) => {
+    try {
+        const userId = req.userId;
+        
+        console.log(`[CHECK_USER_TEAMS] Checking teams for user ${userId}`);
+        
+        const participations = await Participation.find({ members: userId })
+            .populate('bounty', 'title description amount deadline isActive')
+            .populate('members', 'name profileImage role');
+        
+        console.log(`[CHECK_USER_TEAMS] Found ${participations.length} teams for user ${userId}`);
+        
+        return res.status(200).json({
+            success: true,
+            teams: participations,
+            teamCount: participations.length
+        });
+    } catch (err) {
+        console.error("[CHECK_USER_TEAMS] Error checking user teams:", err);
+        return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+    }
+};
+
+// Send team message
+exports.sendTeamMessage = async (req, res) => {
+    try {
+        const { teamId, message } = req.body;
+        const userId = req.userId;
+
+        console.log(`[SEND_TEAM_MESSAGE] User ${userId} sending message to team ${teamId}`);
+
+        if (!teamId || !message) {
+            return res.status(400).json({ success: false, message: "Team ID and message are required" });
+        }
+
+        // Check if user is a member of this team
+        const participation = await Participation.findById(teamId);
+        if (!participation) {
+            console.log(`[SEND_TEAM_MESSAGE] Team ${teamId} not found`);
+            return res.status(404).json({ success: false, message: "Team not found" });
+        }
+
+        const isMember = participation.members.some(member => member.toString() === userId);
+        if (!isMember) {
+            console.log(`[SEND_TEAM_MESSAGE] User ${userId} is not a member of team ${teamId}`);
+            return res.status(403).json({ success: false, message: "Access denied. You are not a member of this team" });
+        }
+
+        // Create and save the message
+        const newMessage = await TeamMessage.create({
+            teamId: teamId,
+            sender: userId,
+            message: message.trim(),
+            messageType: 'text'
+        });
+
+        // Populate sender info for the response
+        await newMessage.populate('sender', 'name profileImage');
+
+        console.log(`[SEND_TEAM_MESSAGE] Message saved with ID: ${newMessage._id}`);
+
+        return res.status(200).json({
+            success: true,
+            message: "Message sent successfully",
+            data: newMessage
+        });
+
+    } catch (error) {
+        console.error("Error sending team message:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
